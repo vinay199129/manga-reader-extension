@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Cinematic, narrated manga reading experience",
 
-  "permissions": ["activeTab", "scripting", "storage"],
+  "permissions": ["activeTab", "scripting", "storage", "tts", "offscreen", "tabs"],
   "host_permissions": ["<all_urls>"],
 
   "action": {
@@ -31,7 +31,8 @@
       "src/engine/*.js",
       "src/content.js",
       "lib/*",
-      "lib/tesseract/*"
+      "lib/tesseract/*",
+      "offscreen/*"
     ],
     "matches": ["<all_urls>"]
   }],

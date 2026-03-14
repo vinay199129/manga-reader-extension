@@ -1,17 +1,14 @@
-// src/engine/tts.js — Text-to-speech wrapper (Chrome-agnostic, reusable in mobile)
-// Mobile note: On iOS with React Native WebView, window.speechSynthesis is blocked.
-// Replace speak() with a postMessage to the native layer using expo-speech. See Phase 5 docs.
+// src/engine/tts.js — Text-to-speech wrapper
+// In Chrome extension context, delegates to chrome.tts via proxy (no user gesture needed).
+// The proxy is injected by content.js → bridge.js → background.js.
+// NO chrome.* APIs here — pure JS for mobile reuse.
 
 /**
- * TTSEngine — wraps Web Speech API for cross-platform TTS.
+ * TTSEngine — wraps TTS functionality.
+ * In proxy mode: delegates to chrome.tts via postMessage chain.
+ * In direct mode (fallback / mobile): uses window.speechSynthesis.
  */
 class TTSEngine {
-  /**
-   * @param {Object} config
-   * @param {number} config.rate - Speech rate (default 1.0)
-   * @param {number} config.pitch - Speech pitch (default 1.0)
-   * @param {number} config.volume - Speech volume (default 1.0)
-   */
   constructor(config = {}) {
     this.config = {
       rate: config.rate ?? 1.0,
@@ -19,21 +16,38 @@ class TTSEngine {
       volume: config.volume ?? 1.0,
     };
     this.voices = [];
+    this._proxy = null; // Set via setProxy()
   }
 
   /**
-   * Load available voices. Must be called before speak().
-   * Handles the async nature of voice loading via voiceschanged event.
-   * @returns {Promise<SpeechSynthesisVoice[]>}
+   * Set the TTS proxy object. Must have: speak(text, options), stop(), pause(), resume(), getVoices().
+   */
+  setProxy(proxy) {
+    this._proxy = proxy;
+    console.log('[MangaReader TTS] Proxy mode enabled — using chrome.tts via background');
+  }
+
+  /**
+   * Load available voices.
    */
   async getVoices() {
+    if (this._proxy) {
+      try {
+        this.voices = await this._proxy.getVoices();
+        console.log(`[MangaReader TTS] ${this.voices.length} voices available via chrome.tts`);
+      } catch {
+        this.voices = [];
+      }
+      return this.voices;
+    }
+
+    // Direct mode fallback (window.speechSynthesis)
     const synth = window.speechSynthesis;
     let voices = synth.getVoices();
     if (voices.length > 0) {
       this.voices = voices;
       return this.voices;
     }
-    // Voices not ready yet — wait for voiceschanged event
     return new Promise((resolve) => {
       const handler = () => {
         synth.removeEventListener('voiceschanged', handler);
@@ -45,21 +59,53 @@ class TTSEngine {
   }
 
   /**
-   * Speak the given text. Returns a Promise that resolves when speech is COMPLETE.
-   * @param {string} text - Text to speak
-   * @param {number} voiceIndex - Index into this.voices array
-   * @returns {Promise<void>}
+   * Speak text. Returns Promise that resolves when speech completes.
    */
   speak(text, voiceIndex = 0) {
+    if (this._proxy) {
+      return this._speakViaProxy(text, voiceIndex);
+    }
+    return this._speakDirect(text, voiceIndex);
+  }
+
+  /**
+   * Proxy mode: speak via chrome.tts (routed through content.js → bridge → background).
+   */
+  _speakViaProxy(text, voiceIndex) {
+    const voice = this.voices[voiceIndex];
+    console.log(`[MangaReader TTS] 🔊 Speaking (rate ${this.config.rate}): "${text}"`);
+    return this._proxy.speak(text, {
+      rate: this.config.rate,
+      pitch: this.config.pitch,
+      volume: this.config.volume,
+      voiceName: voice?.name || undefined,
+      lang: voice?.lang || 'en-US',
+    });
+  }
+
+  /**
+   * Direct mode: speak via window.speechSynthesis (mobile fallback).
+   */
+  _speakDirect(text, voiceIndex) {
     return new Promise((resolve, reject) => {
       try {
+        window.speechSynthesis.cancel();
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.voice = this.voices[voiceIndex] || null;
         utterance.rate = this.config.rate;
         utterance.pitch = this.config.pitch;
         utterance.volume = this.config.volume;
-        utterance.onend = () => resolve();
-        utterance.onerror = (e) => reject(e);
+
+        console.log(`[MangaReader TTS] Speaking direct (rate ${this.config.rate}): "${text.substring(0, 80)}"`);
+
+        const checkInterval = setInterval(() => {
+          if (!window.speechSynthesis.speaking) clearInterval(checkInterval);
+          else if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+        }, 5000);
+
+        utterance.onend = () => { clearInterval(checkInterval); resolve(); };
+        utterance.onerror = (e) => { clearInterval(checkInterval); reject(e); };
+
         window.speechSynthesis.speak(utterance);
       } catch (err) {
         reject(err);
@@ -67,36 +113,31 @@ class TTSEngine {
     });
   }
 
-  /** Pause current speech */
   pause() {
+    if (this._proxy) { this._proxy.pause(); return; }
     window.speechSynthesis.pause();
   }
 
-  /** Resume paused speech */
   resume() {
+    if (this._proxy) { this._proxy.resume(); return; }
     window.speechSynthesis.resume();
   }
 
-  /** Cancel all speech immediately */
   stop() {
+    if (this._proxy) { this._proxy.stop(); return; }
     window.speechSynthesis.cancel();
   }
 
-  /** @returns {boolean} Whether speech is currently active */
   isSpeaking() {
+    if (this._proxy) return false; // Can't query chrome.tts speaking state from here
     return window.speechSynthesis.speaking;
   }
 
-  /**
-   * Update speech rate for subsequent speak() calls.
-   * @param {number} rate
-   */
   setRate(rate) {
     this.config.rate = rate;
   }
 }
 
-// Export for both module and script-tag contexts
 if (typeof window !== 'undefined') {
   window.TTSEngine = TTSEngine;
 }
