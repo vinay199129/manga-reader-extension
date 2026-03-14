@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=300">
+  <title>Manga Reader</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 300px;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      padding: 16px;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .header img { width: 28px; height: 28px; }
+    .header h1 {
+      font-size: 16px;
+      font-weight: 700;
+      color: #e94560;
+    }
+    .status-bar {
+      background: #16213e;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 12px;
+      color: #a0a0b8;
+      margin-bottom: 10px;
+      min-height: 32px;
+      display: flex;
+      align-items: center;
+    }
+    .status-bar.active { color: #e94560; }
+    .current-text {
+      background: #16213e;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 11px;
+      color: #ccc;
+      margin-bottom: 12px;
+      min-height: 40px;
+      max-height: 56px;
+      overflow: hidden;
+      line-height: 1.4;
+    }
+    .controls {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .controls button {
+      width: 44px;
+      height: 44px;
+      border: none;
+      border-radius: 50%;
+      background: #e94560;
+      color: #fff;
+      font-size: 18px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s;
+    }
+    .controls button:hover { background: #d63851; }
+    .controls button:disabled {
+      background: #3a3a50;
+      color: #666;
+      cursor: default;
+    }
+    .setting {
+      margin-bottom: 12px;
+    }
+    .setting label {
+      display: block;
+      font-size: 11px;
+      color: #a0a0b8;
+      margin-bottom: 4px;
+    }
+    .setting select,
+    .setting input[type="range"] {
+      width: 100%;
+    }
+    .setting select {
+      background: #16213e;
+      color: #eee;
+      border: 1px solid #333;
+      border-radius: 4px;
+      padding: 6px 8px;
+      font-size: 12px;
+    }
+    .speed-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .speed-row input { flex: 1; }
+    .speed-row .speed-val {
+      font-size: 12px;
+      color: #e94560;
+      min-width: 30px;
+      text-align: right;
+    }
+    .footer {
+      text-align: center;
+      font-size: 10px;
+      color: #555;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <img src="../icons/icon48.png" alt="icon">
+    <h1>Manga Reader</h1>
+  </div>
+
+  <div class="status-bar" id="statusBar">Ready</div>
+
+  <div class="current-text" id="currentText">—</div>
+
+  <div class="controls">
+    <button id="btnPlay" title="Play">&#9654;</button>
+    <button id="btnPause" title="Pause" disabled>&#9208;</button>
+    <button id="btnStop" title="Stop" disabled>&#9209;</button>
+  </div>
+
+  <div class="setting">
+    <label for="voiceSelect">Narrator voice</label>
+    <select id="voiceSelect"></select>
+  </div>
+
+  <div class="setting">
+    <label for="speedSlider">Speed</label>
+    <div class="speed-row">
+      <input type="range" id="speedSlider" min="0.5" max="2.0" step="0.1" value="1.0">
+      <span class="speed-val" id="speedVal">1.0</span>
+    </div>
+  </div>
+
+  <div class="footer">Works on any manga site</div>
+
+  <script src="../src/popup.js"></script>
+</body>
+</html>

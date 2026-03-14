@@ -1,0 +1,15 @@
+# Dependencies & large binaries
+node_modules/
+lib/tesseract/eng.traineddata.gz
+lib/tesseract/tesseract-core-simd.wasm.js
+
+# ML models (Phase 2+)
+models/*.onnx
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+*.swp
