@@ -65,7 +65,7 @@ class SiteAdapter {
       'mangadex.org', 'mangakakalot.com', 'manganato.com', 'mangareader.to',
       'readm.org', 'mangahere.cc',
       'mangafox.me', 'mangapark.to', 'mangasee123.com',
-      'chapmanganato.to', 'manganelo.com',
+      'chapmanganato.to', 'manganelo.com', 'natomanga.com',
     ];
     if (ltrEnSites.some(s => host.includes(s))) {
       return { siteName: host, readingDirection: 'ltr', layoutMode: 'auto', language: 'en', panelSelector: null };

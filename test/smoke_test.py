@@ -22,7 +22,7 @@ TEST_DIR = os.path.dirname(os.path.abspath(__file__))
 SCREENSHOT_PATH = os.path.join(TEST_DIR, 'screenshot.png')
 LOG_PATH = os.path.join(TEST_DIR, 'console_log.json')
 
-DEFAULT_URL = 'https://www.natomanga.com'
+DEFAULT_URL = 'https://comix.to'
 WAIT_SECONDS = 5
 
 
