@@ -6,6 +6,8 @@
  * PanelDetector — identifies manga panel images on a page using DOM heuristics.
  */
 class PanelDetector {
+  static _dbg(...args) { if (typeof window !== 'undefined' && window.__mangaReaderDebug) console.log('[MangaReader PanelDetector]', ...args); }
+
   constructor(config = {}) {
     this.config = {
       strategy: config.strategy ?? 'heuristic',
@@ -23,25 +25,38 @@ class PanelDetector {
    */
   async detect() {
     this._updateOverlay('Scanning page...');
-    
-    // Scroll to bottom and back to trigger lazy loading
+
+    // Scroll to bottom and back to trigger lazy loading (multiple passes for SPA/React sites)
     await this._scrollScan();
-    
+
     // Attempt attribute-based lazy load handling
     this._forceLazyLoad();
-    
-    // Wait for network/DOM
-    await this._sleep(1500);
+
+    // Wait for network/DOM — longer wait for SPA-rendered content
+    await this._sleep(2000);
+
+    // Second pass: SPA sites may need a re-scroll after initial images render
+    // (React/Next.js IntersectionObserver triggers on scroll, but rendering is async)
+    const imgCountBefore = document.querySelectorAll('img').length;
+    await this._scrollScan();
+    await this._sleep(1000);
+    const imgCountAfter = document.querySelectorAll('img').length;
+    if (imgCountAfter > imgCountBefore) {
+      PanelDetector._dbg(`Second pass found ${imgCountAfter - imgCountBefore} new images, doing a third pass`);
+      await this._scrollScan();
+      await this._sleep(1000);
+    }
 
     const allImages = Array.from(document.querySelectorAll('img'));
-    console.log(`[MangaReader PanelDetector] Total <img> elements: ${allImages.length} (mode: ${this.config.layoutMode}, dir: ${this.config.readingDirection})`);
+    PanelDetector._dbg(`Total <img> elements: ${allImages.length} (mode: ${this.config.layoutMode}, dir: ${this.config.readingDirection})`);
 
     // Log each image for debugging
     allImages.forEach((img, i) => {
       const w = img.naturalWidth || img.clientWidth || 0;
       const h = img.naturalHeight || img.clientHeight || 0;
       const src = (img.src || img.dataset?.src || '').substring(0, 80);
-      console.log(`[MangaReader PanelDetector]   img[${i}] ${w}x${h} src="${src}"`);
+      const cls = img.className || '';
+      PanelDetector._dbg(`  img[${i}] ${w}x${h} class="${cls}" src="${src}"`);
     });
 
     let panels;
@@ -55,9 +70,7 @@ class PanelDetector {
 
     console.log(`[MangaReader PanelDetector] Found ${panels.length} panels`);
     panels.forEach((p, i) => {
-      const w = p.element.naturalWidth || p.element.clientWidth;
-      const h = p.element.naturalHeight || p.element.clientHeight;
-      console.log(`[MangaReader PanelDetector]   Panel ${i + 1}: ${w}x${h}`);
+      PanelDetector._dbg(`  Panel ${i + 1}: ${p.element.naturalWidth || p.element.clientWidth}x${p.element.naturalHeight || p.element.clientHeight}`);
     });
     return panels;
   }
@@ -70,14 +83,11 @@ class PanelDetector {
     const filtered = allImages.filter(img => {
       const pass = this._isMangaPanel(img);
       if (!pass) {
-        const w = img.naturalWidth || img.clientWidth || 0;
-        const h = img.naturalHeight || img.clientHeight || 0;
-        const src = (img.src || '').substring(0, 60);
-        console.log(`[MangaReader PanelDetector] SKIPPED: ${w}x${h} src="${src}"`);
+        PanelDetector._dbg(`SKIPPED: ${img.naturalWidth || img.clientWidth || 0}x${img.naturalHeight || img.clientHeight || 0} src="${(img.src || '').substring(0, 60)}"`);
       }
       return pass;
     });
-    console.log(`[MangaReader PanelDetector] Paged filter: ${filtered.length}/${allImages.length} passed`);
+    PanelDetector._dbg(`Paged filter: ${filtered.length}/${allImages.length} passed`);
     return filtered
       .sort((a, b) => this._sortByReadingOrder(a, b))
       .map((element, index) => ({
@@ -113,21 +123,51 @@ class PanelDetector {
    */
   _isWebtoonStrip(img) {
     const style = window.getComputedStyle(img);
-    if (style.display === 'none' || style.visibility === 'hidden') return false;
+    if (style.display === 'none' || style.visibility === 'hidden') {
+      PanelDetector._dbg(`REJECT: hidden by CSS display="${style.display}" visibility="${style.visibility}"`);
+      return false;
+    }
+    if (parseFloat(style.opacity) === 0) {
+      PanelDetector._dbg(`REJECT: opacity=0`);
+      return false;
+    }
 
     const width = img.naturalWidth || img.clientWidth || img.width || 0;
     const height = img.naturalHeight || img.clientHeight || img.height || 0;
-    if (width === 0 && height === 0) return false;
 
-    // Webtoon strips: at least 200px wide (less strict on height)
-    if (width < 200) return false;
+    // Accept images that have at least some rendered size (clientWidth) even if naturalWidth is 0 (still loading)
+    const renderedW = img.clientWidth || 0;
+    const renderedH = img.clientHeight || 0;
+    if (width === 0 && renderedW === 0) {
+      PanelDetector._dbg(`REJECT: width=0`);
+      return false;
+    }
 
-    const src = (img.src || '').toLowerCase();
-    if (!src || src === 'about:blank') return false;
+    // Webtoon strips: at least 200px wide
+    if (Math.max(width, renderedW) < 200) {
+      PanelDetector._dbg(`REJECT: too narrow ${Math.max(width, renderedW)}px`);
+      return false;
+    }
+
+    const src = (img.src || img.dataset?.src || '').toLowerCase();
+    if (!src || src === 'about:blank') {
+      PanelDetector._dbg(`REJECT: no src`);
+      return false;
+    }
 
     // Skip ad/UI images
-    if (this._isUIImage(src)) return false;
+    if (this._isUIImage(src)) {
+      PanelDetector._dbg(`REJECT: UI image`);
+      return false;
+    }
 
+    // Skip very small images that happen to be wide (e.g. separator bars)
+    if (Math.max(height, renderedH) < 50) {
+      PanelDetector._dbg(`REJECT: too short ${Math.max(height, renderedH)}px`);
+      return false;
+    }
+
+    PanelDetector._dbg(`✓ WEBTOON ACCEPT: ${width || renderedW}x${height || renderedH}px class="${img.className}" src="${src.substring(0, 50)}"`);
     return true;
   }
 
@@ -176,28 +216,48 @@ class PanelDetector {
 
   /**
    * Scroll down the page to trigger lazy loaded images.
+   * Caps scan distance and stops early when no new images appear.
+   * Critical for SPA/React sites that render images via IntersectionObserver.
    */
   async _scrollScan() {
-    console.log('[MangaReader] Scanning page for lazy images...');
+    PanelDetector._dbg('Scanning page for lazy images...');
     const originalY = window.scrollY;
-    const height = document.body.scrollHeight;
-    
-    // Quick scan down in steps
-    for (let scrollY = 0; scrollY < height; scrollY += 800) {
-      window.scrollTo(0, scrollY);
-      await new Promise(r => setTimeout(r, 60)); 
-    }
-    
-    // Ensure bottom is reached
-    window.scrollTo(0, height);
-    await new Promise(r => setTimeout(r, 200));
+    const fullHeight = Math.max(
+      document.body.scrollHeight,
+      document.documentElement.scrollHeight
+    );
 
-    // Scroll back to top
-    window.scrollTo(0, 0);
+    // Cap scan at 50 viewport heights — prevents scrolling through entire SPA
+    // (a typical manga chapter is 20-30 viewport heights)
+    const maxScan = Math.min(fullHeight, window.innerHeight * 50);
+
+    const step = Math.max(window.innerHeight * 0.8, 400);
+    let lastImgCount = document.querySelectorAll('img').length;
+    let noNewImagesSteps = 0;
+
+    for (let scrollY = 0; scrollY < maxScan; scrollY += step) {
+      window.scrollTo({ top: scrollY, behavior: 'instant' });
+      window.dispatchEvent(new Event('scroll'));
+      await new Promise(r => setTimeout(r, 150));
+
+      // Check if new images appeared — if none for 5 consecutive steps, stop early
+      const currentImgCount = document.querySelectorAll('img').length;
+      if (currentImgCount > lastImgCount) {
+        noNewImagesSteps = 0;
+        lastImgCount = currentImgCount;
+      } else {
+        noNewImagesSteps++;
+        if (noNewImagesSteps >= 5 && scrollY > window.innerHeight * 3) {
+          PanelDetector._dbg(`No new images for ${noNewImagesSteps} steps — stopping scan at ${Math.round(scrollY)}px`);
+          break;
+        }
+      }
+    }
+
+    // Scroll back to original position
+    window.scrollTo({ top: 0, behavior: 'instant' });
     await new Promise(r => setTimeout(r, 200));
-    
-    // Restore original position if user had scrolled
-    if (originalY > 0) window.scrollTo(0, originalY);
+    if (originalY > 0) window.scrollTo({ top: originalY, behavior: 'instant' });
   }
 
   _updateOverlay(msg) {
@@ -227,46 +287,31 @@ class PanelDetector {
   }
 
   /**
-   * Force lazy-loaded images to load.
+   * Force lazy-loaded images to load by copying data-* attrs to src.
+   * Also removes native loading="lazy" to force immediate loading.
    */
   _forceLazyLoad() {
-    const lazyAttrs = ['data-src', 'data-lazy-src', 'data-original', 'data-url', 'data-image'];
+    const lazyAttrs = ['data-src', 'data-lazy-src', 'data-original', 'data-url', 'data-image', 'data-srcset'];
     document.querySelectorAll('img').forEach(img => {
+      // Remove native lazy loading to force immediate load
+      if (img.loading === 'lazy') {
+        img.loading = 'eager';
+      }
+
       if (!img.src || img.src === 'about:blank' || img.src.endsWith('loading.gif') || img.src.includes('pixel.gif')) {
         for (const attr of lazyAttrs) {
           const val = img.getAttribute(attr);
-          if (val && val.startsWith('http')) {
-            img.src = val;
+          if (val && (val.startsWith('http') || val.startsWith('/'))) {
+            if (attr === 'data-srcset') {
+              img.srcset = val;
+            } else {
+              img.src = val;
+            }
             break;
           }
         }
       }
     });
-  }
-
-  /**
-   * Pre-scroll the page to trigger lazy-loaded images.
-   */
-  async _waitForImages() {
-    try {
-      const originalScroll = window.scrollY;
-      const pageHeight = document.body.scrollHeight;
-      const viewportHeight = window.innerHeight;
-      const steps = Math.ceil(pageHeight / viewportHeight);
-
-      console.log(`[MangaReader PanelDetector] Pre-scrolling (${steps} steps)...`);
-
-      for (let i = 0; i <= steps; i++) {
-        window.scrollTo(0, i * viewportHeight);
-        await this._sleep(300);
-      }
-      window.scrollTo(0, pageHeight);
-      await this._sleep(500);
-      window.scrollTo(0, originalScroll);
-      await this._sleep(500);
-    } catch (err) {
-      console.warn('[MangaReader PanelDetector] waitForImages error:', err);
-    }
   }
 
   _observeNewImages() {

@@ -6,6 +6,8 @@
  * SiteAdapter — auto-detects site characteristics for optimal reading experience.
  */
 class SiteAdapter {
+  static _dbg(...args) { if (typeof window !== 'undefined' && window.__mangaReaderDebug) console.log('[MangaReader SiteAdapter]', ...args); }
+
   constructor() {
     this._siteConfig = null;
   }
@@ -24,13 +26,13 @@ class SiteAdapter {
     const known = this._matchKnownSite(host);
     if (known) {
       this._siteConfig = known;
-      console.log(`[MangaReader SiteAdapter] Known site: ${known.siteName} (${known.readingDirection}, ${known.layoutMode}, ${known.language})`);
+      SiteAdapter._dbg(`Known site: ${known.siteName} (${known.readingDirection}, ${known.layoutMode}, ${known.language})`);
       return this._siteConfig;
     }
 
     // Auto-detect from page content
     this._siteConfig = this._autoDetect(host, url);
-    console.log(`[MangaReader SiteAdapter] Auto-detected: ${this._siteConfig.siteName} (${this._siteConfig.readingDirection}, ${this._siteConfig.layoutMode}, ${this._siteConfig.language})`);
+    SiteAdapter._dbg(`Auto-detected: ${this._siteConfig.siteName} (${this._siteConfig.readingDirection}, ${this._siteConfig.layoutMode}, ${this._siteConfig.language})`);
     return this._siteConfig;
   }
 
@@ -52,6 +54,7 @@ class SiteAdapter {
       'webtoons.com', 'tapas.io', 'tappytoon.com', 'lezhin.com',
       'webtoon.xyz', 'manhwatop.com', 'manhuaplus.com',
       'asurascans.com', 'reaperscans.com', 'flamescans.org',
+      'comix.to', 'comick.io',
     ];
     if (webtoonSites.some(s => host.includes(s))) {
       return { siteName: host, readingDirection: 'ltr', layoutMode: 'webtoon', language: 'en', panelSelector: null };
@@ -60,7 +63,7 @@ class SiteAdapter {
     // English manga readers (LTR, paged)
     const ltrEnSites = [
       'mangadex.org', 'mangakakalot.com', 'manganato.com', 'mangareader.to',
-      'comick.io', 'comix.to', 'readm.org', 'mangahere.cc',
+      'readm.org', 'mangahere.cc',
       'mangafox.me', 'mangapark.to', 'mangasee123.com',
       'chapmanganato.to', 'manganelo.com',
     ];
@@ -144,7 +147,7 @@ class SiteAdapter {
 
     // Need at least 3 tall images and >40% tall to call it webtoon
     if (tallImages.length >= 3 && images.length > 0 && tallImages.length / images.length > 0.4) {
-      console.log(`[MangaReader SiteAdapter] Detected webtoon: ${tallImages.length}/${images.length} tall images`);
+      SiteAdapter._dbg(`Detected webtoon: ${tallImages.length}/${images.length} tall images`);
       return 'webtoon';
     }
 

@@ -2,14 +2,11 @@
 // Loads engine libraries and orchestrates playback. Communicates with extension via postMessage ↔ bridge.js.
 // NO chrome.* APIs — runs in MAIN world.
 
-const BUILD_TIMESTAMP = 'v2026.03.14.23.50.00'; // Change this each time you edit
-
 if (window.__mangaReaderInitialised) {
-  // Already injected — do nothing
   console.log('[MangaReader] Content script already initialized — skipping');
 } else {
   window.__mangaReaderInitialised = true;
-  console.log('[MangaReader] Content script loading... BUILD:', BUILD_TIMESTAMP);
+  console.log('[MangaReader] Content script loading...');
 
   const SOURCE = 'manga-reader';
   const EXT_URL = window.__mangaReaderExtURL || '';
@@ -38,15 +35,10 @@ if (window.__mangaReaderInitialised) {
       }
       const s = document.createElement('script');
       s.src = fullUrl;
-      s.onload = () => {
-        console.log(`[MangaReader] ✓ Loaded: ${path}`);
-        resolve();
-      };
+      s.onload = () => resolve();
       s.onerror = (err) => {
-        console.error(`[MangaReader] ✗ FAILED to load: ${path}`);
-        console.error(`[MangaReader] Full URL: ${fullUrl}`);
-        console.error(`[MangaReader] Error:`, err);
-        resolve(); // Resolve anyway to continue initialization
+        console.error(`[MangaReader] Failed to load: ${fullUrl}`, err);
+        resolve();
       };
       document.head.appendChild(s);
     });
@@ -76,10 +68,55 @@ if (window.__mangaReaderInitialised) {
     });
   }
 
+  function captureTabAsDataUrl() {
+    return new Promise((resolve) => {
+      const requestId = 'cap_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+      const timeout = setTimeout(() => {
+        window.removeEventListener('message', handler);
+        resolve(null);
+      }, 10000);
 
+      function handler(event) {
+        if (event.data?.source === SOURCE &&
+            event.data?.type === 'captureTabResponse' &&
+            event.data?.requestId === requestId) {
+          window.removeEventListener('message', handler);
+          clearTimeout(timeout);
+          resolve(event.data.dataUrl || null);
+        }
+      }
+      window.addEventListener('message', handler);
+      window.postMessage({ source: SOURCE, action: 'captureTab', requestId }, '*');
+    });
+  }
 
   /**
-   * Speak text via chrome.tts (routed through bridge → background).
+   * Run a bubble-crop data URL through TrOCR in the offscreen document.
+   * Routes: content → bridge → background → offscreen.
+   * Falls back silently if TrOCR is unavailable.
+   */
+  function ocrImageViaBackend(dataUrl) {
+    return new Promise((resolve) => {
+      const requestId = 'ocr_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+      const timeout = setTimeout(() => {
+        window.removeEventListener('message', handler);
+        resolve(''); // timeout — caller falls back to default OCR
+      }, 30000);
+
+      function handler(event) {
+        if (event.data?.source === SOURCE &&
+            event.data?.type === 'ocrImageResponse' &&
+            event.data?.requestId === requestId) {
+          window.removeEventListener('message', handler);
+          clearTimeout(timeout);
+          resolve(event.data.text || '');
+        }
+      }
+      window.addEventListener('message', handler);
+      window.postMessage({ source: SOURCE, action: 'ocrImage', dataUrl, requestId }, '*');
+    });
+  }
+  /**
    * Returns a Promise that resolves when speech finishes.
    */
   function ttsSpeak(text, options = {}) {
@@ -190,59 +227,41 @@ if (window.__mangaReaderInitialised) {
   /**
    * Initialize: load libraries, create engine, set up messaging.
    */
+  // Debug flag — enable verbose logging via: window.__mangaReaderDebug = true
+  function _dbg(...args) {
+    if (window.__mangaReaderDebug) console.log('[MangaReader]', ...args);
+  }
+
   async function init() {
     console.log('[MangaReader] init() starting — EXT_URL:', EXT_URL || '(EMPTY!)');
     try {
       // Load GSAP for animations
-      console.log('[MangaReader] Loading GSAP...');
       await loadLocalScript('lib/gsap.min.js');
-      console.log('[MangaReader] GSAP loaded:', !!window.gsap);
-
-      // Load Tesseract.js (CRITICAL: Loaded locally for MAIN world usage)
-      console.log('[MangaReader] Loading Tesseract.js...');
-      await loadLocalScript('lib/tesseract/tesseract.min.js');
-      
-      console.log('[MangaReader] Tesseract check:');
-      console.log('  - window.Tesseract exists:', typeof window.Tesseract !== 'undefined');
-      console.log('  - window.Tesseract value:', window.Tesseract);
-      console.log('  - window.Tesseract.createWorker exists:', typeof window.Tesseract?.createWorker);
-      
-      if (typeof window.Tesseract === 'undefined') {
-        throw new Error('CRITICAL: Tesseract.js failed to load. Script URL: ' + `${EXT_URL}/lib/tesseract/tesseract.min.js`);
-      }
-      
-      if (typeof window.Tesseract.createWorker !== 'function') {
-        throw new Error('CRITICAL: Tesseract.createWorker is not a function. Tesseract object: ' + JSON.stringify(Object.keys(window.Tesseract || {})));
-      }
-      
-      console.log('[MangaReader] ✓ Tesseract.js loaded successfully');
+      _dbg('GSAP loaded:', !!window.gsap);
 
       // Load engine modules
       const modules = [
         'src/engine/tts.js',
         'src/engine/ocr.js',
+        'src/engine/character-registry.js',
         'src/engine/voice-assigner.js',
         'src/engine/panel-detector.js',
         'src/engine/site-adapter.js',
         'src/engine/manga-engine.js',
       ];
       for (const mod of modules) {
-        console.log(`[MangaReader] Loading ${mod}...`);
         await loadLocalScript(mod);
       }
 
       // Verify critical classes exist
-      const missing = ['TTSEngine', 'OCREngine', 'VoiceAssigner', 'PanelDetector', 'MangaEngine']
+      const missing = ['TTSEngine', 'OCREngine', 'CharacterRegistry', 'VoiceAssigner', 'PanelDetector', 'MangaEngine']
         .filter(cls => !window[cls]);
       if (missing.length > 0) {
         throw new Error(`Missing classes after script load: ${missing.join(', ')}. EXT_URL=${EXT_URL}`);
       }
-      console.log('[MangaReader] All engine modules loaded successfully');
+      console.log('[MangaReader] All engine modules loaded');
 
-      // OCR config (proxy-only: background routes to offscreen Tesseract or HF)
-      const ocrConfig = {
-        language: 'eng',
-      };
+      const ocrConfig = { language: 'eng' };
 
       // Build TTS proxy object that the engine will use
       const ttsProxy = {
@@ -257,13 +276,23 @@ if (window.__mangaReaderInitialised) {
       // Create and initialize engine
       engine = new window.MangaEngine();
       engine.setTTSProxy(ttsProxy);
-      // Removed ambient proxy and OCR proxy setup to simplify for now
-      
       await engine.initialize();
       engine.setImageFetcher(fetchImageAsDataUrl);
-      
+      engine.setAmbientProxy({
+        init: ambientInit,
+        setMood: ambientSetMood,
+        stop: ambientStop,
+      });
+      engine.setTabCaptureFn(captureTabAsDataUrl);
+
+      // Apply Enhanced OCR if it was pre-set before engine was ready
+      if (window.__mangaReaderEnhancedOCR) {
+        engine.setEnhancedOCRFn(ocrImageViaBackend);
+        console.log('[MangaReader] Enhanced OCR ✓ ENABLED (downloading ~60 MB model on first use)');
+      }
+
       _engineInitializing = false;
-      console.log('[MangaReader] Content script initialized in MAIN world');
+      console.log('[MangaReader] Content script initialized');
 
       // Replay any commands that arrived while we were initializing
       if (_pendingCommands.length > 0) {
@@ -288,6 +317,14 @@ if (window.__mangaReaderInitialised) {
 
     // If engine is still initializing, queue actionable commands for replay
     if (!engine) {
+      if (action === 'setDebug') {
+        window.__mangaReaderDebug = !!event.data.enabled;
+        return;
+      }
+      if (action === 'setEnhancedOCR') {
+        window.__mangaReaderEnhancedOCR = !!event.data.enabled;
+        return;
+      }
       if (action === 'status') {
         // Always respond to status — report initializing state
         window.postMessage({
@@ -339,10 +376,25 @@ if (window.__mangaReaderInitialised) {
             engine.config.voiceIndex = event.data.voiceIndex;
           }
           break;
+        case 'setVoiceB':
+          if (event.data.voiceIndex !== undefined) {
+            engine.setVoiceB(event.data.voiceIndex);
+          }
+          break;
         case 'setSpeed':
           if (event.data.rate !== undefined) {
             engine.setSpeed(event.data.rate);
           }
+          break;
+        case 'setDebug':
+          window.__mangaReaderDebug = !!event.data.enabled;
+          _dbg('Debug mode:', window.__mangaReaderDebug);
+          break;
+        case 'setEnhancedOCR':
+          window.__mangaReaderEnhancedOCR = !!event.data.enabled;
+          if (engine) engine.setEnhancedOCRFn(event.data.enabled ? ocrImageViaBackend : null);
+          console.log(`[MangaReader] Enhanced OCR ${event.data.enabled ? '✓ ENABLED (downloading ~60 MB model on first use)' : '✗ DISABLED'}`);
+          _dbg('Enhanced OCR:', event.data.enabled);
           break;
         case 'redetect':
           if (engine && engine.panelDetector) {

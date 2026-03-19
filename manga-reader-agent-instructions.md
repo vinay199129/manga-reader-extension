@@ -91,9 +91,14 @@ manga-reader-extension/
 │
 ├── manifest.json                  # Chrome extension configuration (MV3)
 ├── README.md                      # Project documentation
+├── manga-reader-agent-instructions.md  # This spec document
 │
 ├── popup/
-│   └── popup.html                 # Extension popup UI (play/pause/settings)
+│   └── popup.html                 # Extension popup UI (play/pause/dual voice/speed)
+│
+├── offscreen/
+│   ├── offscreen.html             # Offscreen document for ambient audio
+│   └── offscreen.js               # AudioContext-based ambient mood audio
 │
 ├── icons/
 │   ├── icon16.png                 # Extension icon 16x16 (generate: solid #e94560 square with white ▶)
@@ -113,14 +118,18 @@ manga-reader-extension/
 │   ├── content.js                 # Injected into MAIN world — loads engine + libraries
 │   ├── bridge.js                  # Injected into ISOLATED world — chrome.runtime messaging bridge
 │   ├── popup.js                   # Controls popup UI behaviour
-│   ├── background.js              # MV3 service worker (messaging + image fetch proxy)
+│   ├── background.js              # MV3 service worker (messaging + image fetch proxy + TTS + offscreen)
 │   │
 │   └── engine/                    # Shared engine — reused in mobile app later
-│       ├── manga-engine.js        # Core orchestration logic
+│       ├── manga-engine.js        # Core orchestration logic (scroll, zoom, dim, keyboard nav)
 │       ├── panel-detector.js      # Finds manga panels on page (Phase 1: heuristics, Phase 2: ONNX)
-│       ├── ocr.js                 # Text extraction from speech bubbles
-│       ├── tts.js                 # Text-to-speech wrapper
-│       └── voice-assigner.js      # Assigns voices to characters/bubbles
+│       ├── ocr.js                 # Text extraction from speech bubbles (bubble detection + Tesseract)
+│       ├── tts.js                 # Text-to-speech wrapper (proxy + direct modes)
+│       ├── voice-assigner.js      # Assigns voices to characters/bubbles (single/position/alternating)
+│       └── site-adapter.js        # Auto-detects manga site type, reading direction, language
+│
+├── test/
+│   └── test-manga.html            # Test page with SVG-generated panels + diagnostics
 │
 └── models/                        # ML models (Phase 2 — not needed for Phase 1)
     └── panel-detector.onnx        # Pretrained panel detection model (~8MB)
@@ -145,7 +154,7 @@ Create simple placeholder icons: a solid `#e94560` (manga red) rounded square wi
 - Extension name: "Manga Reader"
 - Version: "0.1.0"
 - Description: "Cinematic, narrated manga reading experience"
-- Permissions needed: `activeTab`, `scripting`, `storage`
+- Permissions needed: `activeTab`, `scripting`, `storage`, `tts`, `offscreen`, `tabs`
 - Host permissions: `<all_urls>` (must work on any manga website)
 - Popup action pointing to `popup/popup.html`
 - Background service worker pointing to `src/background.js`
@@ -160,7 +169,8 @@ Create simple placeholder icons: a solid `#e94560` (manga red) rounded square wi
     "src/engine/*.js",
     "src/content.js",
     "lib/*",
-    "lib/tesseract/*"
+    "lib/tesseract/*",
+    "offscreen/*"
   ],
   "matches": ["<all_urls>"]
 }]
@@ -630,75 +640,59 @@ function fetchImageAsDataUrl(url) {
 
 ## 6. PHASE BUILD PLAN
 
-### Phase 1 — MVP (Build this first)
+### Phase 1 — MVP ✅ COMPLETE
 **Goal:** A working extension. User opens a manga chapter, clicks Play, manga auto-scrolls panel by panel and reads aloud with one narrator voice.
 
-**Files to build:**
-- manifest.json
-- src/background.js
-- src/bridge.js
-- src/engine/tts.js
-- src/engine/ocr.js (Tesseract.js version)
-- src/engine/voice-assigner.js (single strategy — always voice 0)
-- src/engine/panel-detector.js (heuristic version with lazy-load handling)
-- src/engine/manga-engine.js
-- src/content.js
-- src/popup.js
-- popup/popup.html
-- icons/icon16.png, icon48.png, icon128.png (placeholder icons)
+**What was built (beyond original spec):**
+- All originally planned files (manifest, background, bridge, engine/*, content, popup)
+- Cinematic dim/highlight/zoom effects with GSAP
+- Speech bubble detection via connected-component analysis on brightness maps
+- Scene mood detection via canvas pixel sampling
+- Ambient audio via offscreen AudioContext (oscillator + filter per mood)
+- Site auto-detection (~30 known manga sites) via `site-adapter.js`
+- Custom smooth scroll with cubic easing (uses rAF, not scrollIntoView)
+- Context invalidation detection with reload banner (bridge.js)
+- Keep-alive pings to prevent service worker sleep
+- Dual-voice support (Voice A / Voice B selector in popup, position-based assignment)
+- Keyboard navigation (arrow keys, Space to pause, Escape to stop)
+- Settings persistence via chrome.storage.local (voice selections, speed)
+- Debug flag (`window.__mangaReaderDebug = true`) for verbose logging
 
-**Setup steps before coding:**
-1. Create `manga-reader-extension/` folder with structure from Section 4
-2. Download GSAP 3.12.x minified → `lib/gsap.min.js`
-3. Download Tesseract.js 4.x local bundle (worker, WASM, eng.traineddata) → `lib/tesseract/`
-4. Generate placeholder icon PNGs (see Section 4 icon generation)
-
-**Definition of done:** Extension loads on mangakakalot.com or manganato.com. Click Play. Extension scrolls through panels, reads text aloud. No crashes. Stop restores the page to its original state.
+**Definition of done:** ✅ Extension loads on mangakakalot.com or manganato.com. Click Play. Extension scrolls through panels, reads text aloud. No crashes. Stop restores the page to its original state.
 
 ---
 
-### Phase 2 — Panel Detection + Cinematic Animations
-**Goal:** Extension knows exact panel boundaries. Zooms into each panel cinematically. Feels like a moving storyboard.
+### Phase 2 — ONNX Panel Detection + Improved OCR
+**Goal:** Replace heuristic panel detection with ML model inference. Improve OCR accuracy for manga text. Add Ken Burns / shake effects.
 
 **Changes from Phase 1:**
 - `panel-detector.js`: add ONNX model inference strategy using onnxruntime-web
-- `manga-engine.js`: enhance `zoomToPanel()` with GSAP timeline animations (Ken Burns effect, shake for action panels)
+- `manga-engine.js`: add GSAP timeline animations (Ken Burns pan effect, shake for action panels)
 - `manifest.json`: add `models/` as a web accessible resource
-- Add esbuild bundling (ONNX.js is too large for simple CDN injection)
-- Download and bundle `panel-detector.onnx` model file
+- Add esbuild bundling (ONNX.js is too large for simple script injection)
+- Download and bundle `panel-detector.onnx` model file (~8MB)
+- Explore manga-ocr on HuggingFace Spaces as an OCR upgrade path
 
-**Key challenge:** Loading ONNX.js in a MV3 extension requires using the Offscreen Documents API (service workers can't run WASM directly). Create `src/offscreen.html` + `src/offscreen.js` as the WASM execution context.
+**Key challenge:** Loading ONNX.js in a MV3 extension requires using the Offscreen Documents API (service workers can't run WASM directly). The offscreen document for audio already exists — extend it to also handle ONNX inference.
 
 **Timeline:** 1–2 months
 
 ---
 
-### Phase 3 — Dual Voice Narration
-**Goal:** Two distinct voices. Left side of page = Voice A, right side = Voice B. Conversations feel like two characters speaking.
-
-**Changes from Phase 2:**
-- `voice-assigner.js`: switch strategy from `single` to `position`, refine with viewport percentage zones
-- `popup.html` / `popup.js`: add second voice selector ("Character B voice")
-- `manga-engine.js`: pass both voice configs to voice assigner
-
-**Timeline:** 2–4 weeks on top of Phase 2
-
----
-
-### Phase 4 — Smart Character Voices
+### Phase 3 — Smart Character Voices
 **Goal:** Each character gets a consistent voice. Extension identifies character faces and assigns permanent voice identities per chapter.
 
-**Changes from Phase 3:**
+**Changes from Phase 2:**
 - Add face detection ONNX model (MobileNet-based, ~5MB)
 - `voice-assigner.js`: add ML character identification strategy
 - Add character voice mapping stored in `chrome.storage.local` (persists across sessions)
 - Optional: allow user to bring their own ElevenLabs API key for premium voices
 
-**This is the hardest phase.** Defer until Phase 1–3 are stable and have real users.
+**This is the hardest phase.** Defer until Phase 1–2 are stable and have real users.
 
 ---
 
-### Phase 5 — Mobile App (React Native + WebView)
+### Phase 4 — Mobile App (React Native + WebView)
 **Goal:** Standalone iOS + Android app with built-in manga browser. Effects apply automatically on any manga site.
 
 **What gets reused from the extension:**
@@ -706,6 +700,7 @@ function fetchImageAsDataUrl(url) {
 - `src/engine/ocr.js` — unchanged
 - `src/engine/voice-assigner.js` — unchanged
 - `src/engine/panel-detector.js` — unchanged
+- `src/engine/site-adapter.js` — unchanged
 - `src/engine/manga-engine.js` — unchanged
 
 **New code for mobile only:**
@@ -745,8 +740,8 @@ function fetchImageAsDataUrl(url) {
 
 ## 8. CONSTRAINTS — NEVER VIOLATE THESE
 
-1. **No backend server** — all processing must happen in the user's browser. Zero server-side ML inference.
-2. **No paid APIs** — no OpenAI, no Google Cloud Vision, no Azure. Users may optionally provide their own ElevenLabs key in Phase 4, but the core product is always free.
+1. **Backend Dependency is Allowed** — for heavy operations like OCR (Manga-OCR/Vision API) and Panel/Bubble detection, it relies on an external API backend to save browser compute overhead.
+2. **Paid APIs / Models** — Usage of external reliable Vision APIs (like Google Cloud Vision or Azure Vision) or custom hosted python servers (FastAPI + manga-ocr) is acceptable.
 3. **No Chrome APIs in engine files** — `src/engine/*.js` must be pure JavaScript, no `chrome.*` calls. This is required for mobile reuse.
 4. **No build tools for Phase 1** — keep it simple. Plain JS files, no webpack, no bundler.
 5. **No frameworks in popup** — plain HTML + CSS + JS only. No React, no Vue.
@@ -839,7 +834,7 @@ When you receive this document as context, follow these rules:
 
 ---
 
-*Document version: 1.1 — Phase 1 build ready, gap fixes applied*
+*Document version: 1.2 — Phase 1 complete, Phase 2+ redefined*
 *Last updated: March 2026*
-*Changes in v1.1: Added MAIN/ISOLATED world split architecture, local library bundling, cross-origin image proxy, lazy-load handling, DOM restoration, RTL reading direction, icon generation instructions, popup error states, expanded known challenges table, fixed spec inconsistencies (availableVoices, setSpeed handler, Phase 1 voice strategy, web_accessible_resources)*
-*Next update: When Phase 2 begins (add ONNX model specs and offscreen document details)*
+*Changes in v1.2: Phase 1 marked complete with full feature list. Merged Phase 3 (dual-voice) into Phase 1 since code was already there. Renumbered Phase 4→3 and Phase 5→4. Updated folder structure to include offscreen/, site-adapter.js, test/. Updated permissions to include tts, offscreen, tabs. Added offscreen/* to web_accessible_resources. Updated Phase 2 to focus on ONNX panel detection + manga-ocr. Removed dead code references.*
+*Next update: When Phase 2 begins (add ONNX model specs and esbuild config)*

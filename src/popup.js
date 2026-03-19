@@ -9,10 +9,31 @@
   const statusBar = document.getElementById('statusBar');
   const currentText = document.getElementById('currentText');
   const voiceSelect = document.getElementById('voiceSelect');
+  const voiceBSelect = document.getElementById('voiceBSelect');
   const speedSlider = document.getElementById('speedSlider');
   const speedVal = document.getElementById('speedVal');
+  const debugToggle = document.getElementById('debugToggle');
 
   let activeTabId = null;
+
+  const SETTINGS_KEY = 'mangaReaderSettings';
+
+  async function saveSettings() {
+    const settings = {
+      voiceA: voiceSelect.value,
+      voiceB: voiceBSelect.value,
+      speed: speedSlider.value,
+      debug: debugToggle.checked
+    };
+    try { await chrome.storage.local.set({ [SETTINGS_KEY]: settings }); } catch { /* ignore */ }
+  }
+
+  async function loadSettings() {
+    try {
+      const result = await chrome.storage.local.get(SETTINGS_KEY);
+      return result[SETTINGS_KEY] || null;
+    } catch { return null; }
+  }
 
   // --- Get active tab ---
   async function getActiveTab() {
@@ -44,18 +65,35 @@
       return;
     }
 
-    if (status.totalPanels === 0) {
-      statusBar.textContent = 'No manga panels detected on this page';
-      statusBar.classList.remove('active');
-    } else if (status.isPlaying && !status.isPaused) {
-      statusBar.textContent = `Playing panel ${status.currentPanel + 1} / ${status.totalPanels}`;
-      statusBar.classList.add('active');
-    } else if (status.isPaused) {
-      statusBar.textContent = `Paused — panel ${status.currentPanel + 1} / ${status.totalPanels}`;
-      statusBar.classList.remove('active');
+    // Continuous scroll mode (webtoon) — user scrolls, extension narrates
+    if (status.isContinuousMode) {
+      if (status.isPlaying && !status.isPaused) {
+        const progress = status.scrollProgress || 0;
+        const narrated = status.currentPanel || 0;
+        statusBar.textContent = `Listening — ${narrated} narrated | ${progress}%`;
+        statusBar.classList.add('active');
+      } else if (status.isPaused) {
+        statusBar.textContent = `Paused — ${status.scrollProgress || 0}%`;
+        statusBar.classList.remove('active');
+      } else {
+        statusBar.textContent = 'Ready — you scroll, we narrate';
+        statusBar.classList.remove('active');
+      }
     } else {
-      statusBar.textContent = `Ready — ${status.totalPanels} panels detected`;
-      statusBar.classList.remove('active');
+      // Paged panel mode
+      if (status.totalPanels === 0) {
+        statusBar.textContent = 'No manga panels detected on this page';
+        statusBar.classList.remove('active');
+      } else if (status.isPlaying && !status.isPaused) {
+        statusBar.textContent = `Playing panel ${status.currentPanel + 1} / ${status.totalPanels}`;
+        statusBar.classList.add('active');
+      } else if (status.isPaused) {
+        statusBar.textContent = `Paused — panel ${status.currentPanel + 1} / ${status.totalPanels}`;
+        statusBar.classList.remove('active');
+      } else {
+        statusBar.textContent = `Ready — ${status.totalPanels} panels detected`;
+        statusBar.classList.remove('active');
+      }
     }
 
     currentText.textContent = status.currentText || '—';
@@ -65,12 +103,13 @@
     btnStop.disabled = !status.isPlaying && !status.isPaused;
   }
 
-  // --- Populate voice dropdown ---
+  // --- Populate voice dropdown and restore saved settings ---
   function populateVoices() {
     const synth = window.speechSynthesis;
-    const loadVoices = () => {
+    const loadVoices = async () => {
       const voices = synth.getVoices();
       voiceSelect.innerHTML = '';
+      voiceBSelect.innerHTML = '<option value="-1">Same as Voice A</option>';
       if (voices.length === 0) {
         const opt = document.createElement('option');
         opt.textContent = 'Loading voices...';
@@ -78,11 +117,35 @@
         return;
       }
       voices.forEach((voice, i) => {
-        const opt = document.createElement('option');
-        opt.value = i;
-        opt.textContent = `${voice.name} (${voice.lang})`;
-        voiceSelect.appendChild(opt);
+        const label = `${voice.name} (${voice.lang})`;
+        const optA = document.createElement('option');
+        optA.value = i;
+        optA.textContent = label;
+        voiceSelect.appendChild(optA);
+
+        const optB = document.createElement('option');
+        optB.value = i;
+        optB.textContent = label;
+        voiceBSelect.appendChild(optB);
       });
+
+      // Restore saved settings
+      const saved = await loadSettings();
+      if (saved) {
+        if (saved.voiceA && voiceSelect.querySelector(`option[value="${saved.voiceA}"]`)) {
+          voiceSelect.value = saved.voiceA;
+        }
+        if (saved.voiceB && voiceBSelect.querySelector(`option[value="${saved.voiceB}"]`)) {
+          voiceBSelect.value = saved.voiceB;
+        }
+        if (saved.speed) {
+          speedSlider.value = saved.speed;
+          speedVal.textContent = parseFloat(saved.speed).toFixed(1);
+        }
+        if (saved.debug) {
+          debugToggle.checked = true;
+        }
+      }
     };
 
     loadVoices();
@@ -156,6 +219,8 @@
 
     // Now send play
     statusBar.textContent = 'Starting playback...';
+    // Set debug flag on the page before play
+    await sendToTab({ action: 'setDebug', enabled: debugToggle.checked });
     const response = await sendToTab({ action: 'play' });
     if (!response) {
       statusBar.textContent = 'Play command failed — check the page console (F12)';
@@ -168,12 +233,25 @@
 
   voiceSelect.addEventListener('change', () => {
     sendToTab({ action: 'setVoice', voiceIndex: parseInt(voiceSelect.value, 10) });
+    saveSettings();
+  });
+
+  voiceBSelect.addEventListener('change', () => {
+    const val = parseInt(voiceBSelect.value, 10);
+    sendToTab({ action: 'setVoiceB', voiceIndex: val });
+    saveSettings();
   });
 
   speedSlider.addEventListener('input', () => {
     const rate = parseFloat(speedSlider.value);
     speedVal.textContent = rate.toFixed(1);
     sendToTab({ action: 'setSpeed', rate });
+    saveSettings();
+  });
+
+  debugToggle.addEventListener('change', () => {
+    sendToTab({ action: 'setDebug', enabled: debugToggle.checked });
+    saveSettings();
   });
 
   // --- Listen for status updates from content script ---

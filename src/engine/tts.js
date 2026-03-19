@@ -9,6 +9,8 @@
  * In direct mode (fallback / mobile): uses window.speechSynthesis.
  */
 class TTSEngine {
+  static _dbg(...args) { if (typeof window !== 'undefined' && window.__mangaReaderDebug) console.log('[MangaReader TTS]', ...args); }
+
   constructor(config = {}) {
     this.config = {
       rate: config.rate ?? 1.0,
@@ -24,7 +26,7 @@ class TTSEngine {
    */
   setProxy(proxy) {
     this._proxy = proxy;
-    console.log('[MangaReader TTS] Proxy mode enabled — using chrome.tts via background');
+    TTSEngine._dbg('Proxy mode enabled');
   }
 
   /**
@@ -34,7 +36,7 @@ class TTSEngine {
     if (this._proxy) {
       try {
         this.voices = await this._proxy.getVoices();
-        console.log(`[MangaReader TTS] ${this.voices.length} voices available via chrome.tts`);
+        TTSEngine._dbg(`${this.voices.length} voices available via proxy`);
       } catch {
         this.voices = [];
       }
@@ -73,7 +75,7 @@ class TTSEngine {
    */
   _speakViaProxy(text, voiceIndex) {
     const voice = this.voices[voiceIndex];
-    console.log(`[MangaReader TTS] 🔊 Speaking (rate ${this.config.rate}): "${text}"`);
+    TTSEngine._dbg(`Speaking (rate ${this.config.rate}): "${text.substring(0, 60)}"`);
     return this._proxy.speak(text, {
       rate: this.config.rate,
       pitch: this.config.pitch,
@@ -96,7 +98,7 @@ class TTSEngine {
         utterance.pitch = this.config.pitch;
         utterance.volume = this.config.volume;
 
-        console.log(`[MangaReader TTS] Speaking direct (rate ${this.config.rate}): "${text.substring(0, 80)}"`);
+        TTSEngine._dbg(`Speaking direct (rate ${this.config.rate}): "${text.substring(0, 60)}"`);
 
         const checkInterval = setInterval(() => {
           if (!window.speechSynthesis.speaking) clearInterval(checkInterval);

@@ -1,7 +1,5 @@
 // src/engine/voice-assigner.js — Assigns voices to characters/speech bubbles
-// Phase 4 upgrade: replace with ML face classifier that detects character gender/identity
-// from nearby face crops, maps characters to consistent voice IDs, and persists the mapping
-// across panels in the same chapter.
+// Supports strategies: 'single', 'position', 'alternating', 'character' (color-signature based)
 
 /**
  * VoiceAssigner — determines which voice index to use for each speech bubble.
@@ -9,17 +7,26 @@
 class VoiceAssigner {
   /**
    * @param {Object} config
-   * @param {string} config.strategy - 'single' (Phase 1), 'position' (Phase 3), or 'alternating'
+   * @param {string} config.strategy - 'single', 'position', 'alternating', or 'character'
    */
   constructor(config = {}) {
     this.config = {
       strategy: config.strategy ?? 'single',
     };
     this._alternateState = 0;
+    this._characterRegistry = null;
   }
 
   /**
-   * Assign a voice index for a given bubble element.
+   * Wire in a CharacterRegistry for the 'character' strategy.
+   * @param {CharacterRegistry} registry
+   */
+  setCharacterRegistry(registry) {
+    this._characterRegistry = registry;
+  }
+
+  /**
+   * Assign a voice index for a given bubble element (legacy per-panel method).
    * @param {HTMLElement} bubbleElement - The speech bubble DOM element
    * @param {number} availableVoicesCount - Number of available TTS voices
    * @returns {number} Voice index (0 or 1)
@@ -38,9 +45,28 @@ class VoiceAssigner {
   }
 
   /**
+   * Assign a voice for a specific speech bubble using the character registry.
+   * Falls back to legacy strategies if character matching fails.
+   *
+   * @param {HTMLImageElement|string} panelSource - The panel image
+   * @param {{x,y,w,h}} bubbleRegion - Bounding box of the speech bubble within the panel
+   * @param {number} availableVoicesCount
+   * @returns {Promise<number>} Voice index
+   */
+  async assignVoiceForBubble(panelSource, bubbleRegion, availableVoicesCount) {
+    if (this.config.strategy === 'character' && this._characterRegistry) {
+      try {
+        return await this._characterRegistry.assignVoiceForBubble(panelSource, bubbleRegion);
+      } catch {
+        // Fall through to legacy
+      }
+    }
+    // Fallback
+    return this._alternatingStrategy();
+  }
+
+  /**
    * Position strategy: left half of viewport → voice 0, right half → voice 1.
-   * @param {HTMLElement} element
-   * @returns {number}
    */
   _positionStrategy(element) {
     try {
@@ -55,7 +81,6 @@ class VoiceAssigner {
 
   /**
    * Alternating strategy: toggles between 0 and 1 on each call.
-   * @returns {number}
    */
   _alternatingStrategy() {
     const voice = this._alternateState;

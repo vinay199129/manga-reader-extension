@@ -133,8 +133,15 @@
   </div>
 
   <div class="setting">
-    <label for="voiceSelect">Narrator voice</label>
+    <label for="voiceSelect">Voice A (narrator / left)</label>
     <select id="voiceSelect"></select>
+  </div>
+
+  <div class="setting">
+    <label for="voiceBSelect">Voice B (right side)</label>
+    <select id="voiceBSelect">
+      <option value="-1">Same as Voice A</option>
+    </select>
   </div>
 
   <div class="setting">
@@ -143,6 +150,11 @@
       <input type="range" id="speedSlider" min="0.5" max="2.0" step="0.1" value="1.0">
       <span class="speed-val" id="speedVal">1.0</span>
     </div>
+  </div>
+
+  <div class="setting" style="display:flex;align-items:center;gap:8px;">
+    <label for="debugToggle" style="margin:0;cursor:pointer;flex:1;">Debug Console Logging</label>
+    <input type="checkbox" id="debugToggle" style="width:auto;accent-color:#e94560;cursor:pointer;">
   </div>
 
   <div class="footer">Works on any manga site</div>

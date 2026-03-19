@@ -2,8 +2,6 @@
 // Relays messages between chrome.runtime (popup/background) and the engine in MAIN world.
 // This file runs in the ISOLATED content script world and has chrome.runtime access.
 
-const BUILD_TIMESTAMP = 'v2026.03.14.23.50.00'; // Change this each time you edit
-
 if (window.__mangaReaderBridgeInit) {
   // Already injected — do nothing
 } else {
@@ -89,7 +87,8 @@ if (window.__mangaReaderBridgeInit) {
     if (!isActiveBridge()) return false;
 
     if (msg.action === 'play' || msg.action === 'pause' || msg.action === 'resume' ||
-        msg.action === 'stop' || msg.action === 'setVoice' || msg.action === 'setSpeed') {
+        msg.action === 'stop' || msg.action === 'setVoice' || msg.action === 'setVoiceB' ||
+        msg.action === 'setSpeed' || msg.action === 'setDebug' || msg.action === 'setEnhancedOCR') {
       window.postMessage({ source: SOURCE, ...msg }, '*');
       sendResponse({ ok: true });
       return false;
@@ -160,6 +159,33 @@ if (window.__mangaReaderBridgeInit) {
     }
 
 
+    // --- Capture visible tab screenshot (for gutter scanning) ---
+    if (event.data.action === 'captureTab') {
+      const { requestId } = event.data;
+      safeSend({ action: 'captureTab' }, (response) => {
+        window.postMessage({
+          source: SOURCE,
+          type: 'captureTabResponse',
+          requestId,
+          dataUrl: response?.dataUrl || null,
+          error: response?.error || null,
+        }, '*');
+      });
+    }
+
+    // --- Enhanced OCR: route dataUrl to TrOCR in offscreen ---
+    if (event.data.action === 'ocrImage') {
+      const { requestId, dataUrl } = event.data;
+      safeSend({ action: 'ocrImage', dataUrl }, (response) => {
+        window.postMessage({
+          source: SOURCE,
+          type: 'ocrImageResponse',
+          requestId,
+          text: response?.text || '',
+          error: response?.error || null,
+        }, '*');
+      });
+    }
 
     // --- TTS: Speak via chrome.tts in background ---
     if (event.data.action === 'ttsSpeak') {
@@ -203,9 +229,13 @@ if (window.__mangaReaderBridgeInit) {
       });
     }
 
-    // --- Ambient audio: Init/SetMood/Stop via offscreen ---
+    // --- Ambient audio: Init/SetMood/Stop/SFX via offscreen ---
     if (event.data.action === 'ambientInit' || event.data.action === 'ambientSetMood' || event.data.action === 'ambientStop') {
       safeSend({ action: event.data.action, mood: event.data.mood });
+    }
+
+    if (event.data.action === 'ambientSFX') {
+      safeSend({ action: 'ambientSFX', sfxType: event.data.sfxType });
     }
   });
 
@@ -223,10 +253,11 @@ if (window.__mangaReaderBridgeInit) {
     // Keep-alive ping — prevents service worker from sleeping during playback
     try {
       chrome.runtime.sendMessage({ action: 'keepAlive' }, () => {
-        if (chrome.runtime.lastError) { /* ignore — just a ping */ }
+        // Suppress Chrome's "Unchecked runtime.lastError" warning for keep-alive pings
+        void chrome.runtime.lastError;
       });
     } catch { /* context may be dead */ }
   }, 20000); // every 20s (service worker has 30s timeout)
 
-  console.log('[MangaReader Bridge] Initialized in ISOLATED world. BUILD:', BUILD_TIMESTAMP, 'Instance:', _bridgeInstanceId);
+  console.log('[MangaReader Bridge] Initialized in ISOLATED world. Instance:', _bridgeInstanceId);
 }

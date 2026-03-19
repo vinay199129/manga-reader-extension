@@ -13,3 +13,10 @@ Thumbs.db
 # IDE
 .vscode/
 *.swp
+
+# Test artifacts
+test/screenshot.png
+test/console_log.json
+test/chrome-profile/
+__pycache__/
+backend/__pycache__/
