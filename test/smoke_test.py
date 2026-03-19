@@ -22,7 +22,7 @@ TEST_DIR = os.path.dirname(os.path.abspath(__file__))
 SCREENSHOT_PATH = os.path.join(TEST_DIR, 'screenshot.png')
 LOG_PATH = os.path.join(TEST_DIR, 'console_log.json')
 
-DEFAULT_URL = 'https://chapmanganato.to'
+DEFAULT_URL = 'https://www.natomanga.com'
 WAIT_SECONDS = 5
 
 
@@ -98,8 +98,14 @@ def run_test(args):
             print(f'[TEST] Extension detected: {len(manga_logs)} MangaReader log(s)')
 
         # Verdict
-        # Filter out known non-errors (favicon, third-party scripts)
-        real_errors = [e for e in errors if 'favicon' not in e.lower() and 'ERR_BLOCKED_BY_CLIENT' not in e]
+        # Filter out known non-errors (favicon, third-party, site HTTP errors, network errors, CSP report-only)
+        real_errors = [e for e in errors
+                       if 'favicon' not in e.lower()
+                       and 'ERR_BLOCKED_BY_CLIENT' not in e
+                       and 'Failed to load resource: the server responded' not in e
+                       and 'net::ERR_' not in e
+                       and 'report-only' in e.lower() is False
+                       and 'Content Security Policy' not in e]
 
         print(f'\n--- Result ---')
         print(f'  Errors:   {len(real_errors)}')

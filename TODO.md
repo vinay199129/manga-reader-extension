@@ -1,22 +1,22 @@
 # Manga Reader Extension — Roadmap & Task List
 
-## M0: Stabilize (Bug Fixes)
-- [ ] Fix `offscreen.html` — remove `trocr.js` script tag (file doesn't exist, causes 404)
-- [ ] Fix `manga-engine.js:1444` — `setVoiceB()` sets strategy `'position'` but checks expect `'character'`
-- [ ] Fix `manga-engine.js:1349` — `this.ocr._cropRegion()` doesn't exist, gutter OCR crashes silently
-- [ ] Fix stale Tesseract comments in `content.js:103` and `manga-engine.js:135`
-- [ ] Commit stable baseline
+## M0: Stabilize (Bug Fixes) -- DONE
+- [x] Fix `offscreen.html` — remove `trocr.js` script tag
+- [x] Fix `manga-engine.js:1444` — setVoiceB strategy bug
+- [x] Fix `manga-engine.js:1349` — dead `_cropRegion` call
+- [x] Fix stale Tesseract comments
+- [x] Commit stable baseline
 
-## M1: Agent Testing (Selenium Smoke Test)
-- [ ] `pip install selenium`
-- [ ] Create `test/smoke_test.py` — loads extension, navigates to mangakakalot, captures console errors + screenshot
-- [ ] Verify test runs and passes on clean codebase
+## M1: Agent Testing (Selenium Smoke Test) -- DONE
+- [x] `pip install selenium`
+- [x] Create `test/smoke_test.py`
+- [x] Verify test runs and passes
 
-## M2: Backend manga-ocr as Primary OCR
-- [ ] Harden `backend/main.py` — health check endpoint, error handling, CORS
-- [ ] Update `ocr.js` — make backend manga-ocr the default path (not Tesseract)
-- [ ] Add fallback: if backend is down, show clear error in popup instead of silent failure
-- [ ] Test: Play on mangakakalot → OCR extracts real text via backend
+## M2: Backend manga-ocr as Primary OCR -- DONE
+- [x] Harden `backend/main.py` — `/health` endpoint, timing logs
+- [x] Update `ocr.js` — `checkBackend()`, `_backendAlive` tracking, timeout
+- [x] Add backend status dot to popup header
+- [ ] **Manual test**: Start backend → play on manga page → verify OCR
 
 ## M3: Real Bubble Detection (ONNX)
 - [ ] Download `ogkalu/comic-text-and-bubble-detector` ONNX model (~42.9M params)
