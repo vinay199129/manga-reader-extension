@@ -13,6 +13,7 @@
   const speedSlider = document.getElementById('speedSlider');
   const speedVal = document.getElementById('speedVal');
   const debugToggle = document.getElementById('debugToggle');
+  const backendDot = document.getElementById('backendDot');
 
   let activeTabId = null;
 
@@ -269,6 +270,23 @@
     if (status) updateUI(status);
   }
 
+  // --- Check OCR backend health ---
+  async function checkBackend() {
+    try {
+      const res = await fetch('http://127.0.0.1:8000/health', { signal: AbortSignal.timeout(2000) });
+      if (res.ok) {
+        backendDot.className = 'backend-dot ok';
+        backendDot.title = 'OCR backend connected';
+      } else {
+        backendDot.className = 'backend-dot fail';
+        backendDot.title = 'OCR backend error';
+      }
+    } catch {
+      backendDot.className = 'backend-dot fail';
+      backendDot.title = 'OCR backend offline — run: cd backend && python main.py';
+    }
+  }
+
   // --- Init ---
   async function init() {
     const tab = await getActiveTab();
@@ -277,6 +295,7 @@
     }
 
     populateVoices();
+    checkBackend();
 
     // Request initial status
     const status = await sendToTab({ action: 'status' });

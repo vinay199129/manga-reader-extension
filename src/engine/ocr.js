@@ -8,25 +8,41 @@ class OCREngine {
   static _dbg(...args) { if (typeof window !== 'undefined' && window.__mangaReaderDebug) console.log('[MangaReader OCR]', ...args); }
 
   constructor(config = {}) {
-    // Normalize language codes
     let lang = config.language ?? 'en';
     this.config = { language: lang, apiUrl: config.apiUrl || 'http://127.0.0.1:8000/extract-text' };
     this.fetchImageFn = null;
+    this._backendAlive = false;
   }
 
   setImageFetcher(fn) { this.fetchImageFn = fn; }
-  
+
   setEnhancedOCRFn(fn) {
-    // Legacy integration for offscreen documents if needed.
-    // Ignored since we use Python backend now.
+    // Legacy — ignored since we use Python backend now.
   }
 
   setLanguage(lang) {
     this.config.language = lang;
   }
 
+  /** Check if the manga-ocr backend is reachable. */
+  async checkBackend() {
+    try {
+      const baseUrl = this.config.apiUrl.replace(/\/extract-text$/, '');
+      const res = await fetch(baseUrl + '/health', { signal: AbortSignal.timeout(3000) });
+      this._backendAlive = res.ok;
+    } catch {
+      this._backendAlive = false;
+    }
+    return this._backendAlive;
+  }
+
   async initialize() {
-    console.log(`[MangaReader OCR] Initializing with backend at ${this.config.apiUrl}`);
+    await this.checkBackend();
+    if (this._backendAlive) {
+      console.log(`[MangaReader OCR] Backend connected at ${this.config.apiUrl}`);
+    } else {
+      console.warn('[MangaReader OCR] Backend NOT reachable — OCR will be unavailable. Start the server: cd backend && python main.py');
+    }
   }
 
   async destroy() {
@@ -84,6 +100,15 @@ class OCREngine {
         return '';
       }
 
+      // Lazy re-check: if backend was down at init, try again once per call
+      if (!this._backendAlive) {
+        await this.checkBackend();
+        if (!this._backendAlive) {
+          OCREngine._dbg('Backend still unreachable — skipping OCR');
+          return '';
+        }
+      }
+
       let dataUrl = await this._resolveToDataUrl(imageSource);
       if (!dataUrl) return '';
 
@@ -92,7 +117,8 @@ class OCREngine {
       const response = await fetch(this.config.apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_data_url: dataUrl })
+        body: JSON.stringify({ image_data_url: dataUrl }),
+        signal: AbortSignal.timeout(30000),
       });
 
       if (!response.ok) {
@@ -104,6 +130,9 @@ class OCREngine {
       return result.text || '';
     } catch (err) {
       console.warn('[MangaReader OCR] extractText error:', err.message);
+      if (err.name === 'TimeoutError' || err.message.includes('Failed to fetch')) {
+        this._backendAlive = false;
+      }
       return '';
     }
   }

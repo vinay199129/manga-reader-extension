@@ -14,9 +14,12 @@ Thumbs.db
 .vscode/
 *.swp
 
+# Python
+.venv/
+__pycache__/
+backend/__pycache__/
+
 # Test artifacts
 test/screenshot.png
 test/console_log.json
 test/chrome-profile/
-__pycache__/
-backend/__pycache__/

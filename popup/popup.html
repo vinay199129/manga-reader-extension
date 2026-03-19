@@ -25,6 +25,15 @@
       font-weight: 700;
       color: #e94560;
     }
+    .backend-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #666;
+      flex-shrink: 0;
+    }
+    .backend-dot.ok { background: #4caf50; }
+    .backend-dot.fail { background: #e94560; }
+    .backend-dot[title] { cursor: help; }
     .status-bar {
       background: #16213e;
       border-radius: 6px;
@@ -120,6 +129,7 @@
   <div class="header">
     <img src="../icons/icon48.png" alt="icon">
     <h1>Manga Reader</h1>
+    <span class="backend-dot" id="backendDot" title="Checking OCR backend..."></span>
   </div>
 
   <div class="status-bar" id="statusBar">Ready</div>
