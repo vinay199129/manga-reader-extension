@@ -2,8 +2,7 @@
 // Handles extension lifecycle, script injection, cross-origin proxying,
 // chrome.tts for narration, and offscreen document for ambient audio.
 
-const BUILD_TIMESTAMP = 'v2026.03.15.00.05.00'; // Change this each time you edit
-console.log('[MangaReader BG] Service worker loaded:', BUILD_TIMESTAMP);
+console.log('[MangaReader BG] Service worker loaded');
 
 // --- Extension icon click: inject scripts into the active tab ---
 chrome.action.onClicked.addListener(async (tab) => {
@@ -113,16 +112,39 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return true;
     }
 
+    // --- Capture visible tab screenshot (for gutter scanning) ---
+    if (msg.action === 'captureTab') {
+      chrome.tabs.captureVisibleTab(null, { format: 'png' }, (dataUrl) => {
+        if (chrome.runtime.lastError) {
+          sendResponse({ error: chrome.runtime.lastError.message });
+        } else {
+          sendResponse({ dataUrl });
+        }
+      });
+      return true;
+    }
+
     // --- Cross-origin image fetch proxy ---
     if (msg.action === 'fetchImage' && msg.url) {
+      console.log('[MangaReader Background] Fetching image:', msg.url.substring(0, 80));
       fetch(msg.url)
-        .then((r) => r.blob())
+        .then((r) => {
+          console.log('[MangaReader Background] Fetch response:', r.status, r.statusText);
+          return r.blob();
+        })
         .then((blob) => {
+          console.log('[MangaReader Background] Got blob:', blob.size, 'bytes, type:', blob.type);
           const reader = new FileReader();
-          reader.onloadend = () => sendResponse({ dataUrl: reader.result });
+          reader.onloadend = () => {
+            console.log('[MangaReader Background] Converted to dataUrl:', reader.result?.substring(0, 100));
+            sendResponse({ dataUrl: reader.result });
+          };
           reader.readAsDataURL(blob);
         })
-        .catch((err) => sendResponse({ error: err.message }));
+        .catch((err) => {
+          console.error('[MangaReader Background] Fetch error:', err.message);
+          sendResponse({ error: err.message });
+        });
       return true;
     }
 
@@ -197,7 +219,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     // --- Ambient audio: forward to offscreen document ---
-    if (msg.action === 'ambientInit' || msg.action === 'ambientSetMood' || msg.action === 'ambientStop') {
+    if (msg.action === 'ambientInit' || msg.action === 'ambientSetMood' || msg.action === 'ambientStop' || msg.action === 'ambientSFX') {
       ensureOffscreen().then(() => {
         try {
           chrome.runtime.sendMessage({ target: 'offscreen', ...msg }, (response) => {
@@ -212,6 +234,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
       }).catch(err => {
          sendResponse({ ok: false, error: 'Ambient offscreen setup failed' });
+      });
+      return true;
+    }
+
+    // --- Enhanced OCR (TrOCR): forward to offscreen document ---
+    if (msg.action === 'ocrImage') {
+      ensureOffscreen().then(() => {
+        try {
+          chrome.runtime.sendMessage({ target: 'offscreen', action: 'ocrImage', dataUrl: msg.dataUrl }, (response) => {
+            if (chrome.runtime.lastError) {
+              sendResponse({ text: '', error: chrome.runtime.lastError.message });
+            } else {
+              sendResponse(response || { text: '' });
+            }
+          });
+        } catch (err) {
+          sendResponse({ text: '', error: err.message });
+        }
+      }).catch(() => {
+        sendResponse({ text: '', error: 'Offscreen setup failed' });
       });
       return true;
     }
